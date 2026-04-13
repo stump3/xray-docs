@@ -18,7 +18,8 @@
 │   ├── 04-subscription-links.md   # Subscription links и клиентские конфиги
 │   ├── 05-management-panels.md    # Marzban, 3x-ui — установка и интеграция
 │   ├── 06-troubleshooting.md      # Диагностика и типичные ошибки
-│   └── 07-operations.md           # Ротация ключей, бэкап, мониторинг
+│   ├── 07-operations.md           # Ротация ключей, бэкап, мониторинг
+│   └── 08-source-comparison.md    # Сравнение XTLS vs lxhao61 vs наших вариантов
 ├── configs/
 │   ├── variant-a/                 # Xray напрямую на 443 (Reality/XHTTP)
 │   ├── variant-b/                 # Nginx stream SNI routing
@@ -26,8 +27,18 @@
 │   ├── variant-d/                 # Self-SNI (VLESS+Vision+TLS)
 │   ├── lxhao61-M+H+K+A/          # Production: Reality + XHTTP + mKCP
 │   ├── lxhao61-E+F+H+A/          # Production: VLESS+Vision+TLS + Trojan + XHTTP
+│   ├── xtls-examples/             # Официальные примеры XTLS/Xray-core
+│   │   ├── VLESS-XHTTP-Reality/   # Минимальный современный (≥ v25.3.6)
+│   │   ├── VLESS-Vision-Reality/  # Vision+Reality minimal
+│   │   ├── VLESS-Vision-TLS/      # Vision+TLS с CN-блокировкой
+│   │   ├── All-in-One-fallbacks/  # 17 протоколов + generate.sh
+│   │   ├── VLESS-XHTTP3-Nginx/    # HTTP/3 через UDS
+│   │   ├── VLESS-WSS-Nginx/       # WebSocket+TLS
+│   │   ├── VLESS-gRPC-Reality/    # gRPC+Reality на порту 80
+│   │   ├── ReverseProxy/          # Bridge→portal паттерн
+│   │   └── Serverless-for-Iran/   # Cloudflare Workers
 │   ├── systemd/                   # systemd unit-файлы
-│   ├── client/                    # Клиентские конфиги (v2ray-core, xray-core)
+│   ├── client/                    # Клиентские конфиги lxhao61
 │   └── other/                     # DNS, BT, CN-блокировка, статистика
 └── scripts/
     ├── gen-keys.sh                # Генерация UUID, Reality-ключей, Short ID
@@ -96,6 +107,22 @@ systemctl enable --now xray
 | HTTP/3 server | Nginx ≥ v1.25.0 + SSL lib с QUIC |
 | H2C + HTTP/1.1 на одном порту | Nginx ≥ v1.25.1 |
 | `ssl_reject_handshake` | Nginx ≥ v1.19.4 |
+
+---
+
+## Источники конфигов
+
+В репозитории три источника — они **не перемешаны**:
+
+| Каталог | Источник | Характер |
+|---|---|---|
+| `configs/variant-*/` | Наши | Структурированный выбор архитектуры |
+| `configs/lxhao61-*/` | [lxhao61/integrated-examples](https://github.com/lxhao61/integrated-examples) | Production, PROXY protocol, комплексные |
+| `configs/xtls-examples/` | [XTLS/Xray-examples](https://github.com/XTLS/Xray-examples) | Официальные, минимальные, reference |
+
+Подробное сравнение всех трёх: [docs/08-source-comparison.md](docs/08-source-comparison.md)
+
+> ⚠️ В `xtls-examples/VLESS-SplitHTTP-Nginx` используется устаревшее имя транспорта `splithttp` — в актуальном Xray это `xhttp`. В `xtls-examples/VLESS-Vision-Reality` поле `dest` устарело — актуальное `target`.
 
 ---
 
