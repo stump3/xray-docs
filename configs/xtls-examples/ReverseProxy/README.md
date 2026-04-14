@@ -1,24 +1,51 @@
-[ENGLISH](README.ENG.md)
+# ReverseProxy (bridge → portal)
 
-# 反向代理
-# 原理
+Pattern for servers that have **no direct inbound internet connection** — the internal server reaches out to a public portal, which clients then connect to.
 
-Xray Client <--- VMESS/SS ---> Xray Portal(需要公网 IP) <--- VMESS/SS ---> Xray Bridge
-# 说明
-配置中，内网设备使用的配置为 `bridge.json`，有公网 ip 的设备使用 `portal.json`，通过`portal`连接到内网的设备使用`client.json`。
+```
+Client ──── VMESS/SS ──→ Portal (public IP)
+                              ↑
+                         VMESS/SS (outbound)
+                              │
+                           Bridge (private/NAT server)
+```
 
-实际应用中，可以使用`VMESS-TCP、Shadowsocks-2022`等作为Xray Client 到 Xray Portal、Xray Bridge 到 Xray Portal 的传输协议。
+## Use cases
 
-## psk
+- Server behind NAT without port forwarding
+- Corporate network with outbound-only firewall
+- Double-hop architecture for extra anonymity
+- Home server reaching out through a cloud relay
 
-Shadowsocks 2022 使用与 WireGuard 类似的预共享密钥作为密码。
+## Variants
 
-使用 `openssl rand -base64 <长度>` 以生成与 shadowsocks-rust 兼容的密钥，长度取决于所使用的加密方法。
+| Folder | Transport | Notes |
+|---|---|---|
+| `Vmess-TCP/` | VMess + TCP | Minimal example |
+| `VLESS-TCP-XTLS-WS/` | VLESS+XTLS or WS | Fallback-based, two client modes |
+| `Shadowsocks-2022/` | SS 2022 | Pre-shared key auth |
 
-| 加密方法                          | 密钥长度 |
-|-------------------------------|-----:|
-| 2022-blake3-aes-128-gcm       |   16 |
-| 2022-blake3-aes-256-gcm       |   32 |
-| 2022-blake3-chacha20-poly1305 |   32 |
+## Files in each variant
 
-在 Go 实现中，32 位密钥始终工作。
+- `bridge.jsonc` — config for the **internal server** (no public IP). Connects outward to portal.
+- `portal.jsonc` — config for the **public relay**. Accepts both bridge and client connections.
+- `client.jsonc` — config for the **end user**. Connects to portal.
+
+## Shadowsocks 2022 key generation
+
+| Cipher | Key length |
+|---|---|
+| `2022-blake3-aes-128-gcm` | 16 bytes |
+| `2022-blake3-aes-256-gcm` | 32 bytes |
+| `2022-blake3-chacha20-poly1305` | 32 bytes |
+
+```bash
+openssl rand -base64 16   # 128-bit
+openssl rand -base64 32   # 256-bit
+```
+
+## Notes
+
+- Bridge initiates the connection — no inbound port needed on the bridge side.
+- Portal needs a public IP with open ports for both clients and the bridge.
+- VLESS+XTLS-WS variant: portal routing can split traffic between bridge (internal network) and direct (internet) by destination IP.

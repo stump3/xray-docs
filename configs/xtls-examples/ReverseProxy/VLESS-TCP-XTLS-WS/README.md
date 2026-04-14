@@ -1,23 +1,21 @@
-# VLESS over TCP with XTLS + 回落 & 分流 
+# VLESS over TCP+XTLS with WebSocket fallback — ReverseProxy
 
-[ENGLISH](README.ENG.md)
+Uses port 443 with XTLS + WS fallback and routing rules to implement a reverse proxy with improved concealment.
 
-配合回落，使用 443 端口 + XTLS + WS 和路由分流，实现反向代理，增强隐蔽性。
+Two client connection modes:
+- **VLESS over TCP + XTLS** — direct, high performance
+- **VLESS over WebSocket + TLS** — CDN-compatible
 
-客户端连接方式有 VLESS over WS with TLS / VLESS over TCP with XTLS 两种
+## How it works
 
-portal 设置默认回落到 80 端口的 Web 服务器（也可以换成数据库、FTP 等），参考 [VLESS-TCP-XTLS-WHATEVER](https://github.com/XTLS/Xray-examples/blob/main/VLESS-TCP-XTLS-WHATEVER/README.md)
-
-# 额外配置
-如果你的 portal 在境外，可以使用路由分流来同时实现科学上网 + 访问内网设备。
-
-## 路由分流 
-根据配置内提示，在 `Portal` 配置中, 取消注释第一项路由中的：
-```       
-// "ip": [
-//   "geoip:private"
-// ],
+```
+Client (XTLS or WS) → Portal :443 → Bridge (internal server)
+                            │
+                            └── fallback :80 → Web server (decoy)
 ```
 
-此时流量匹配 `"external"` 或 `"externalws"` 标签，且访问的目标 ip 为`私有 ip 地址`时，才会将流量转发至 bridge，其余流量走 direct。
+Portal defaults fallback to a web server on port 80 (can be replaced with any local service).
 
+## Routing split (optional)
+
+If the portal is outside your country, you can enable split routing to simultaneously browse the internet and access internal network resources. In `portal.jsonc`, uncomment the routing rule that forwards traffic tagged `"external"` or `"externalws"` with a private IP destination to the bridge — everything else goes direct.
