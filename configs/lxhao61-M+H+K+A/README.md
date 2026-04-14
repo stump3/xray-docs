@@ -8,7 +8,7 @@
 |---|---|---|---|
 | M | VLESS + Vision | REALITY | Основной. Xray на :443, target = собственный Nginx на :8443 |
 | H | VLESS + XHTTP | TLS | CDN-совместимый. Nginx терминирует TLS, grpc_pass → Xray :2023 |
-| K | VLESS + XHTTP | REALITY (套娃) | Клиент подключается через Reality (M), внутри — XHTTP. Конфиг общий с H |
+| K | VLESS + XHTTP | REALITY (nested) | Клиент подключается через Reality (M), внутри — XHTTP. Конфиг общий с H |
 | A | VLESS + mKCP | seed | UDP :2052. Высокая пропускная способность при потерях. Без CDN |
 
 ## Файлы
@@ -76,7 +76,7 @@ vless://UUID_M@SERVER_IP:443?security=reality&encryption=none&pbk=PUBLIC_KEY&fp=
 vless://UUID_H@cdn.example.com:443?security=tls&encryption=none&type=xhttp&path=/VLSpdG9k&sni=cdn.example.com#H-CDN
 ```
 
-**K (VLESS+XHTTP+REALITY, 套娃):**
+**K (VLESS+XHTTP+REALITY, nested):**
 ```
 vless://UUID_H@SERVER_IP:443?security=reality&encryption=none&pbk=PUBLIC_KEY&fp=chrome&type=xhttp&path=/VLSpdG9k&sni=h3a.example.com&sid=SHORT_ID#K
 ```
