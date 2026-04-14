@@ -90,7 +90,7 @@ systemctl enable --now xray
 | E | VLESS + Vision + TLS |
 | F | Trojan + RAW + TLS |
 | H | VLESS + XHTTP + TLS |
-| K | VLESS + XHTTP + REALITY (套娃) |
+| K | VLESS + XHTTP + REALITY (nested) |
 | A | VLESS + mKCP + seed |
 | N | NaiveProxy (Caddy) |
 | T | Trojan-Go (Caddy) |

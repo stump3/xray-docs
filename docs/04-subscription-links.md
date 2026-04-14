@@ -184,7 +184,7 @@ echo "Subscription updated: https://your-domain.com/sub/encoded"
 | `xray_vless_vision_reality_config.jsonc` | VLESS + Vision + REALITY |
 | `xray_vless_vision_tls_config.jsonc` | VLESS + Vision + TLS |
 | `xray_vless_xhttp_reality_config.jsonc` | VLESS + XHTTP + REALITY |
-| `xray_vless_xhttp_reality-tls_config.jsonc` | VLESS + XHTTP + REALITY (套娃 через TLS) |
+| `xray_vless_xhttp_reality-tls_config.jsonc` | VLESS + XHTTP + REALITY (nested via TLS) |
 | `xray_vless_xhttp_tls_config.jsonc` | VLESS + XHTTP + TLS |
 | `xray_vless_httpupgrade_tls_config.jsonc` | VLESS + HTTPUpgrade + TLS |
 | `xray_trojan_raw_tls_config.jsonc` | Trojan + RAW + TLS |
