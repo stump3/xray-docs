@@ -695,15 +695,341 @@ Internet :SS_PORT (TCP+UDP) → Shadowsocks 2022
 
 ---
 
+---
+
+## Variant D — Self-SNI (VLESS+Vision+TLS, собственный decoy)
+
+### Текущее состояние
+
+```
+Internet :443 (TCP)
+    │
+    ▼
+Xray VLESS+TLS+Vision (main inbound)
+    └── default fallback → 127.0.0.1:NGINX_DECOY_PORT
+                               └── Nginx: decoy сайт + /sub
+Internet :80 → Nginx: 301 → HTTPS
+```
+
+Один протокол, один fallback. Nginx работает на TCP-порту — в отличие от Variant C, где Nginx на Unix socket.
+
+### Чем D отличается от C
+
+| | Variant D | Variant C |
+|---|---|---|
+| Xray терминирует TLS | ✅ | ✅ |
+| Vision flow | ✅ с самого начала | добавляется в C.0 |
+| Nginx decoy | TCP-порт `127.0.0.1:DECOY_PORT` | Unix socket `H1_SOCK` |
+| Легенда сервера | ✅ домен = сертификат = IP = сайт | ⚡ decoy без согласованной легенды |
+| Reality | ❌ | ❌ |
+| Стартовая сложность | Низкая | Средняя |
+
+Добавление протоколов постепенно сближает D с C. Принципиальное различие остаётся одно: декой-сайт D на TCP-порту выглядит как настоящий веб-сервер с точки зрения сканеров (там реальный HTML, реальный HSTS), тогда как Unix socket C снаружи вообще не виден.
+
+### Потолок архитектуры D
+
+Как и C, Variant D не может включать Reality — оба используют `fallbacks`, несовместимые с Reality. Если понадобится Reality рядом с TLS-протоколами, нужен переход на Variant B (Nginx stream как роутер).
+
+---
+
+### D.1 — VLESS+WS fallback
+
+Первое расширение: path-based fallback на WebSocket inbound. Механика идентична Variant C, но Nginx уже запущен на TCP-порту — новый `location` добавляется в существующий server block.
+
+#### Новые переменные в `vars.env`
+
+```bash
+UUID_WS=yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy   # make keys
+WS_PORT=9001
+WS_PATH=/your-ws-path
+```
+
+#### Новый inbound в `xray-server.json.tpl`
+
+```jsonc
+{
+  "tag": "vless-ws-in",
+  "listen": "127.0.0.1",
+  "port": ${WS_PORT},
+  "protocol": "vless",
+  "settings": {
+    "clients": [
+      { "id": "${UUID_WS}", "email": "user-ws", "level": 0 }
+    ],
+    "decryption": "none"
+  },
+  "streamSettings": {
+    "network": "ws",
+    "wsSettings": {
+      "path": "${WS_PATH}",
+      "acceptProxyProtocol": true
+    }
+  },
+  "sniffing": { "enabled": true, "destOverride": ["http","tls","quic"], "routeOnly": true }
+}
+```
+
+#### Обновить fallbacks в главном inbound
+
+```jsonc
+"fallbacks": [
+  { "path": "${WS_PATH}", "dest": ${WS_PORT}, "xver": 1 },  // ← добавить
+  { "dest": ${NGINX_DECOY_PORT} }                            // default — последним
+]
+```
+
+#### Обновить `nginx.conf.tpl` — добавить location в decoy server block
+
+```nginx
+server {
+    listen 127.0.0.1:${NGINX_DECOY_PORT};
+    ...
+
+    location ${WS_PATH} {
+        if ($http_upgrade != "websocket") { return 404; }
+        proxy_pass http://127.0.0.1:${WS_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        real_ip_header proxy_protocol;   # раскомментировать если xver: 1
+    }
+
+    location / { ... }   // decoy — без изменений
+}
+```
+
+#### Subscription link
+
+```
+vless://UUID_WS@DOMAIN:443?security=tls&encryption=none&type=ws&path=WS_PATH&sni=DOMAIN&fp=chrome#D-WS-TLS
+```
+
+---
+
+### D.2 — VMess+WS fallback
+
+Аналогично D.1 — второй path-based fallback. Добавить в `vars.env`:
+
+```bash
+UUID_VMESS=zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz
+VMESS_PORT=9002
+VMESS_PATH=/your-vmess-path
+```
+
+Структура inbound та же, что у D.1, с заменой `protocol: "vmess"` и `UUID_VMESS`. VMess не использует `decryption`, вместо этого у клиентов есть встроенное шифрование.
+
+Добавить fallback перед default:
+```jsonc
+{ "path": "${VMESS_PATH}", "dest": ${VMESS_PORT}, "xver": 1 }
+```
+
+Добавить `location ${VMESS_PATH}` в Nginx по той же схеме что WS.
+
+---
+
+### D.3 — VLESS+XHTTP fallback
+
+XHTTP предпочтительнее WS — разделяет upload/download на отдельные HTTP-запросы, что затрудняет корреляцию трафика. Добавлять после D.1–D.2, либо вместо WS если CDN поддерживает XHTTP.
+
+```bash
+UUID_XHTTP=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+XHTTP_PORT=9003
+XHTTP_PATH=/your-xhttp-path
+```
+
+Inbound:
+```jsonc
+{
+  "tag": "xhttp-in",
+  "listen": "127.0.0.1",
+  "port": ${XHTTP_PORT},
+  "protocol": "vless",
+  "settings": {
+    "clients": [{ "id": "${UUID_XHTTP}", "email": "user-xhttp", "level": 0 }],
+    "decryption": "none"
+  },
+  "streamSettings": {
+    "network": "xhttp",
+    "xhttpSettings": { "path": "${XHTTP_PATH}", "mode": "auto", "acceptProxyProtocol": true }
+  },
+  "sniffing": { "enabled": true, "destOverride": ["http","tls","quic"], "routeOnly": true }
+}
+```
+
+Fallback (добавить перед `alpn:h2` если он уже есть, и перед default):
+```jsonc
+{ "path": "${XHTTP_PATH}", "dest": ${XHTTP_PORT}, "xver": 1 }
+```
+
+Nginx location:
+```nginx
+location ${XHTTP_PATH} {
+    proxy_pass http://127.0.0.1:${XHTTP_PORT};
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+}
+```
+
+---
+
+### D.4 — gRPC через h2c (с ALPN prerequisite)
+
+gRPC требует HTTP/2. В Variant D Nginx работает на TCP-порту — для h2c добавляем отдельный Unix socket, аналогично Variant C. Это аккуратнее чем смешивать HTTP/1.1 и h2c на одном listener.
+
+> **Prerequisite:** добавить `"h2"` в ALPN главного inbound **перед** этим шагом.
+>
+> ```jsonc
+> "tlsSettings": {
+>   "fingerprint": "chrome",
+>   "alpn": ["h2", "http/1.1"],   // ← было только ["http/1.1"]
+>   ...
+> }
+> ```
+
+#### Новые переменные в `vars.env`
+
+```bash
+UUID_GRPC=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
+GRPC_PORT=9004
+GRPC_SERVICE_NAME=your-grpc-service
+H2C_SOCK=/dev/shm/xraylab-d-h2c.sock
+```
+
+#### Новый fallback в главном inbound
+
+```jsonc
+"fallbacks": [
+  { "path": "${WS_PATH}",   "dest": ${WS_PORT},   "xver": 1 },
+  { "path": "${VMESS_PATH}","dest": ${VMESS_PORT}, "xver": 1 },
+  { "path": "${XHTTP_PATH}","dest": ${XHTTP_PORT}, "xver": 1 },
+  { "alpn": "h2",           "dest": "${H2C_SOCK}", "xver": 1 }, // ← gRPC
+  { "dest": ${NGINX_DECOY_PORT} }
+]
+```
+
+#### Новый gRPC inbound
+
+```jsonc
+{
+  "tag": "grpc-in",
+  "listen": "127.0.0.1",
+  "port": ${GRPC_PORT},
+  "protocol": "vless",
+  "settings": {
+    "clients": [{ "id": "${UUID_GRPC}", "email": "user-grpc", "level": 0 }],
+    "decryption": "none"
+  },
+  "streamSettings": {
+    "network": "grpc",
+    "grpcSettings": { "serviceName": "${GRPC_SERVICE_NAME}" },
+    "security": "none"
+  }
+}
+```
+
+#### Nginx: добавить h2c Unix socket listener
+
+В `nginx.conf.tpl` добавить отдельный server block рядом с существующим decoy:
+
+```nginx
+# Существующий decoy server (без изменений):
+server {
+    listen 127.0.0.1:${NGINX_DECOY_PORT};
+    ...
+}
+
+# Новый h2c listener для gRPC:
+server {
+    listen unix:${H2C_SOCK} http2 proxy_protocol;
+    set_real_ip_from unix:;
+    real_ip_header proxy_protocol;
+
+    location /${GRPC_SERVICE_NAME} {
+        if ($request_method != "POST") { return 404; }
+        client_body_buffer_size 1m;
+        client_body_timeout 1h;
+        client_max_body_size 0;
+        grpc_read_timeout 1h;
+        grpc_send_timeout 1h;
+        grpc_pass grpc://127.0.0.1:${GRPC_PORT};
+    }
+
+    location / { return 404; }
+}
+```
+
+#### Subscription link
+
+```
+vless://UUID_GRPC@DOMAIN:443?security=tls&encryption=none&type=grpc&serviceName=GRPC_SERVICE_NAME&sni=DOMAIN&fp=chrome#D-gRPC-TLS
+```
+
+---
+
+### Итоговая картина Variant D
+
+```
+Internet :443 (TCP)
+    │
+    ▼
+Xray VLESS+TLS+Vision (ALPN: h2 + http/1.1)
+    │
+    ├── path=/WS_PATH     →  :9001  VLESS+WS        → Nginx proxy_pass
+    ├── path=/VMESS_PATH  →  :9002  VMess+WS         → Nginx proxy_pass
+    ├── path=/XHTTP_PATH  →  :9003  VLESS+XHTTP      → Nginx proxy_pass
+    ├── alpn=h2           →  H2C_SOCK → Nginx → :9004 VLESS+gRPC
+    └── default           →  127.0.0.1:DECOY_PORT
+                                └── Nginx: decoy сайт + /sub (HTTP/1.1)
+
+Internet :80 → Nginx: 301 redirect → HTTPS
+```
+
+| Tag | Протокол | Транспорт | Путь входа |
+|---|---|---|---|
+| D-main | VLESS + Vision | TCP+TLS | DOMAIN:443 (прямой) |
+| D-WS | VLESS | WebSocket+TLS | :443/WS_PATH |
+| D-VMess | VMess | WebSocket+TLS | :443/VMESS_PATH |
+| D-XHTTP | VLESS | XHTTP+TLS | :443/XHTTP_PATH |
+| D-gRPC | VLESS | gRPC+TLS | :443, alpn=h2, h2c sock |
+
+### Где D сходится с C
+
+После шага D.4 архитектура D и C практически идентичны — оба используют Xray как TLS terminator с деревом fallbacks и Nginx на Unix socket для h2c. Принципиальных различий два:
+
+- D сохраняет согласованную легенду: decoy-сайт на реальном TCP-порту, куда можно зайти браузером и получить настоящий HTML с HSTS
+- D не использует Unix socket для HTTP/1.1 decoy — Nginx виден как настоящий веб-сервер
+
+Если после всех расширений понадобится Reality рядом с этими протоколами — это уже **Variant B** (Nginx stream как SNI router).
+
+---
+
 ## Порядок тестирования
 
 Каждый шаг — отдельный коммит, отдельный запуск `make test`:
 
 ```
 B: fix dest→target          # hotfix, не новый протокол
+
 A: + mKCP                   # новый inbound, нет зависимостей
+
 B: + XHTTP+TLS              # Nginx location + новый inbound
 B: + mKCP                   # независимый UDP inbound
-B: + nested K                  # fallback в существующий XHTTP inbound
+B: + nested K               # fallback в существующий XHTTP inbound
 B: + HTTP/3 UDP:443         # только Nginx, Xray не трогаем
+
+C: Vision flow              # только поле в конфиге
+C: ALPN prereq h2           # перед gRPC
+C: + gRPC (h2c sock)        # самый сложный шаг в C
+C: + XHTTP                  # path fallback
+C: + Trojan                 # alpn/SNI fallback
+C: + Shadowsocks            # независимый inbound
+
+D: + VLESS+WS               # path fallback + Nginx location
+D: + VMess+WS               # то же
+D: + VLESS+XHTTP            # path fallback + Nginx location
+D: ALPN prereq h2           # перед gRPC
+D: + gRPC (h2c sock)        # h2c Unix socket + Nginx block
 ```
